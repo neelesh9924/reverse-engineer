@@ -1,0 +1,25 @@
+# Your local data: subjects, conversations, findings, logs, settings, session, browser profiles.
+/data/
+# The local virtual environment the launcher makes.
+/.venv/
+# Python bytecode.
+__pycache__/
+*.pyc
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+# Claude Code, per user
+.claude/settings.local.json
+CLAUDE.local.md
+# Tooling and local files
+.coverage
+htmlcov/
+*.log
+*.tmp
+.env
+# A REA tarball unpacked here by mistake (the native-file restore belongs in the REA checkout)
+rea-agents-*.tgz
+/package/

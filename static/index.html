@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en" data-choice="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Reverse Engineer</title>
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/css/render.css">
+  <link rel="stylesheet" href="/static/css/tools.css">
+  <link rel="stylesheet" href="/static/css/panels.css">
+</head>
+<body>
+  <a id="skip" class="skip-link" href="#main">Skip to main content</a>
+  <a id="skipAsk" class="skip-link" href="#askText">Skip to Ask Claude</a>
+
+  <div class="app" id="app">
+    <nav class="sidebar" id="sidebar" aria-label="Studio">
+      <div class="brand">
+        <img class="logo" src="/static/icon.svg" width="30" height="30" alt="">
+        <span class="brand-text"><span>Reverse Engineer</span><small>REA and Claude, on your PC</small></span>
+      </div>
+      <button id="newSubject" class="btn primary wide" type="button" aria-keyshortcuts="Alt+N"><span>New subject</span></button>
+      <button id="openPalette" class="search-btn" type="button" aria-keyshortcuts="Control+K"
+              aria-label="Search subjects, pages, tools and actions (Ctrl+K)"><span>Search or jump to…</span><kbd>Ctrl K</kbd></button>
+
+      <h2 class="side-label" id="subjectsLabel">Subjects</h2>
+      <ul id="list" class="nav" aria-labelledby="subjectsLabel"></ul>
+      <p id="listEmpty" class="nav-empty" hidden>None yet. Add one with New subject.</p>
+
+      <div class="side-links">
+        <button id="openTools" class="nav-item" type="button"><span class="nav-text"><span class="name">Tools</span></span></button>
+        <button id="openSettings" class="nav-item" type="button"><span class="nav-text"><span class="name">Settings</span></span></button>
+        <button id="shortcutsBtn" class="btn ghost small square" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"></button>
+        <button id="themeBtn" class="btn ghost small square" type="button" aria-label="Switch to dark theme" title="Switch to dark theme"></button>
+      </div>
+      <button id="setupFoot" class="side-alert" type="button" hidden><span>Setup isn’t finished. Open Settings.</span></button>
+      <p id="sideNote" class="side-foot">
+        <span>REA runs on this PC. Asking Claude sends your question, the tool results it reads and the files it opens to Anthropic.</span>
+      </p>
+    </nav>
+
+    <main id="main" class="main" tabindex="-1">
+      <header id="top" class="topbar" hidden>
+        <div class="titles">
+          <span id="titleMark" class="title-mark" aria-hidden="true"></span>
+          <div class="title-text">
+            <h1 id="title" tabindex="-1"></h1>
+            <div id="status" class="status"></div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button id="engineBtn" class="btn small" type="button" hidden><span>Start engine</span></button>
+          <button id="subjectSettings" class="btn ghost square" type="button" hidden
+                  aria-label="Subject settings: rename or remove" title="Subject settings: rename or remove"></button>
+          <button id="showAssist" class="btn" type="button" hidden aria-controls="assist" aria-expanded="false"><span>Ask Claude</span></button>
+        </div>
+      </header>
+
+      <div id="setupBanner" class="banner" role="region" aria-label="Setup" hidden></div>
+
+      <section id="subjectPage" class="content" aria-labelledby="title" hidden>
+        <div id="panels" class="panels"></div>
+      </section>
+
+      <section id="emptyPage" class="page empty-page" aria-labelledby="emptyTitle" hidden>
+        <div class="welcome">
+          <div id="emptyMark" class="empty-mark" aria-hidden="true"></div>
+          <h1 id="emptyTitle" tabindex="-1">Take software apart, down to the evidence</h1>
+          <p class="welcome-lede">Point REA at something on this PC (a program, an app bundle, an APK, a capture) or at a website,
+            then work through it with Claude. Every result is kept as a finding with its evidence and its limits.</p>
+          <button id="emptyNew" class="btn primary large" type="button" aria-keyshortcuts="Alt+N"><span>New subject</span></button>
+          <section class="setup" aria-labelledby="setupTitle">
+            <h2 id="setupTitle">Before you start</h2>
+            <ul id="setupList" class="setup-list"></ul>
+          </section>
+          <p class="welcome-note">REA runs on this PC. Ask Claude uses Claude Code with your own sign-in: your questions, the
+            tool results Claude reads, and any file it opens in the subject’s work folder or the folder that holds the target
+            are sent to Anthropic, so keep a target in a folder of its own. A website subject loads that site in a browser the
+            studio controls.</p>
+        </div>
+      </section>
+
+      <section id="toolsPage" class="page" aria-labelledby="title" hidden></section>
+      <section id="settingsPage" class="page" aria-labelledby="title" hidden></section>
+    </main>
+
+    <aside class="assist" id="assist" aria-labelledby="assistTitle">
+      <div id="assistResize" class="assist-resize" role="separator" tabindex="0" aria-orientation="vertical"
+           aria-controls="assist" aria-label="Resize the Ask Claude panel" title="Drag, or use the arrow keys, to resize"></div>
+      <header class="assist-head">
+        <span id="assistMark" class="assist-mark" aria-hidden="true"></span>
+        <div class="assist-heading">
+          <h2 id="assistTitle" class="assist-title">Ask Claude</h2>
+          <div id="assistContext" class="assist-context"></div>
+        </div>
+        <button id="assistClear" class="btn ghost small square" type="button" aria-label="Clear this conversation"
+                title="Clear this conversation. Findings are kept."></button>
+        <button id="hideAssist" class="btn ghost small square" type="button" aria-label="Hide the Ask Claude panel"
+                title="Hide this panel" aria-controls="assist" aria-expanded="true"></button>
+      </header>
+      <div class="assist-thread" id="thread">
+        <div id="messages" class="messages"></div>
+        <div id="activity"></div>
+      </div>
+      <form class="assist-form" id="askForm" novalidate>
+        <div class="composer" id="composer">
+          <label class="sr-only" for="askText">Ask Claude about this subject</label>
+          <textarea id="askText" rows="1" aria-describedby="askHint askKeys" aria-keyshortcuts="Control+/"></textarea>
+          <div class="composer-foot">
+            <button id="workflowBtn" class="btn ghost small" type="button" hidden title="Start one of REA’s step-by-step workflows"><span>Workflows</span></button>
+            <span class="grow"></span>
+            <button id="stopBtn" class="btn small danger" type="button" hidden><span>Stop</span></button>
+            <button id="sendBtn" class="btn primary small square" type="submit" aria-label="Send" title="Send (Enter)"></button>
+          </div>
+        </div>
+        <p id="askHint" class="assist-hint"></p>
+        <p id="askKeys" class="composer-keys"><kbd>Enter</kbd> sends · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <kbd>↑</kbd> last question</p>
+      </form>
+    </aside>
+  </div>
+
+  <div id="toasts" class="toasts" role="region" aria-label="Notifications"></div>
+  <div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/static/js/core.js"></script>
+  <script src="/static/js/markdown.js"></script>
+  <script src="/static/js/evidence.js"></script>
+  <script src="/static/js/forms.js"></script>
+  <script src="/static/js/tools.js"></script>
+  <script src="/static/js/panels.js"></script>
+  <script src="/static/js/palette.js"></script>
+  <script src="/static/settings.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

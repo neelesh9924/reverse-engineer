@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      # The headless-browser smoke test (tests/test_ui.py) is for local runs.
+      REVERSE_ENGINEER_SKIP_UI: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the unit tests
+        run: python -m unittest discover -s tests -t tests -v
