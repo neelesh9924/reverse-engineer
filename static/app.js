@@ -445,6 +445,7 @@
     Object.assign(state, {
       subjects: data.subjects, job: data.job || null, runs: data.runs || {}, checks: data.checks || null,
       catalog: data.catalog || null, setup: data.setup || null, permissions: data.permissions || null, rev: data.rev,
+      attach: data.attach || null,
     });
     try {
       if (!loaded) { loaded = true; route(false); }
@@ -511,9 +512,13 @@
   let assistOpen = RE.store.get("assistOpen", true) !== false;
   const assist = {
     slug: undefined, rev: undefined, seq: 0, messages: [], nodes: new Map(), empty: null,
-    asking: false, flash: "", drafts: new Map(),
+    asking: false, flash: "", drafts: new Map(), fileDrafts: new Map(),
     activity: null, stepKeys: [], lastStepSaid: 0, said: 0,
   };
+  // The composer's attachments (static/attach.js, shared with other studios: never edited here).
+  let attachJs = null;   // the module, once loaded: chip() for a sent question's files, sizeWords()
+  let att = null;        // its attacher for the composer
+  const attachLimits = () => (state.attach && state.attach.limits) || {};
 
   function applyAssistOpen() {
     $("app").classList.toggle("no-assist", !assistOpen);
@@ -536,6 +541,8 @@
   function switchThread(slug) {
     const box = $("messages");
     if (assist.slug !== undefined && assist.slug) assist.drafts.set(assist.slug, $("askText").value);
+    if (att && assist.slug) assist.fileDrafts.set(assist.slug, att.files);
+    if (att) att.set(slug ? assist.fileDrafts.get(slug) || [] : []);
     assist.slug = slug;
     assist.rev = undefined;
     assist.messages = [];
@@ -623,7 +630,7 @@
           .map(([k, v]) => h("code", null, `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`))) : null;
       return h("article", { class: "msg user", "aria-label": "You" },
         h("div", { class: "msg-head" }, h("span", { class: "who" }, "You"), timeEl(m.at)),
-        prompt, m.text ? h("div", { class: "bubble" }, m.text) : null);
+        prompt, sentFiles(m.files), m.text ? h("div", { class: "bubble" }, m.text) : null);
     }
     if (m.role === "info") return h("div", { class: "msg info", role: "note" }, icon("info", 13), h("span", null, m.text), timeEl(m.at));
     const meta = m.meta ? h("div", { class: "msg-meta" }, m.meta) : null;
@@ -638,6 +645,14 @@
         h("span", { class: "grow" }), copy),
       m.text ? h("div", { class: "msg-text md" }, markdown(m.text)) : null,
       stepsEl(m.steps), meta);
+  }
+  // A sent question's files: each a chip that opens a picture or a PDF and downloads anything else.
+  function sentFiles(files) {
+    if (!Array.isArray(files) || !files.length || !attachJs || !assist.slug) return null;
+    return h("div", { class: "att-chips msg-files", role: "list", "aria-label": "Files you attached" }, files.map((f) => {
+      const href = `/api/attachment/${enc(assist.slug)}/${enc(f.path || f.name || "")}`;
+      return h("span", { role: "listitem" }, attachJs.chip(f, { href, view: !!f.view, thumb: f.view && f.kind === "picture" ? href : "" }));
+    }));
   }
   function stepsEl(steps) {
     if (!Array.isArray(steps) || !steps.length) return null;
@@ -805,6 +820,12 @@
     setAttr($("assistClear"), "aria-disabled", canClear ? null : "true");
     $("composer").classList.toggle("pending", assist.asking);
     show($("workflowBtn"), !!s && !!(state.catalog && state.catalog.ready));
+    const clip = $("attachBtn");
+    const most = attachLimits();
+    show(clip, !!s && !!att);
+    setAttr(clip, "aria-disabled", why ? "true" : null);
+    setAttr(clip, "title", attachJs && most.message
+      ? `Attach files of any kind: up to ${attachJs.sizeWords(most.message)} in all and ${most.count} files with one question` : "Attach files");
   }
 
   function grow() {
@@ -824,7 +845,11 @@
       assist.flash = reply.error;
       RE.announce(reply.error, "assertive");
     } else {
-      if (clearComposer) { $("askText").value = ""; assist.drafts.delete(slug); grow(); }
+      if (clearComposer) {
+        $("askText").value = ""; assist.drafts.delete(slug); grow();
+        if (att && assist.slug === slug) att.clear();
+        assist.fileDrafts.delete(slug);
+      }
       RE.announce("Sent. Claude is working on it.");
     }
     renderAssist();
@@ -840,7 +865,7 @@
     const why = blockReason();
     if (why) { RE.announce(why, "assertive"); return; }
     if (busy()) { RE.announce("Claude is still working. Wait for the answer, or press Stop.", "assertive"); return; }
-    await sendAsk(s.slug, { text });
+    await sendAsk(s.slug, { text, files: att ? att.payload() : [] });
   }
 
   async function chooseWorkflow() {
@@ -1371,5 +1396,12 @@
   themeSync();
   applyAssistOpen();
   wireResize();
-  refresh();
+  // Attachments: a paperclip, a drop on the Ask panel, a paste in the composer. attach.js is a
+  // module, so it is imported; the first poll waits for it, so sent files draw as chips.
+  import("/static/attach.js").then((mod) => {
+    attachJs = mod;
+    att = mod.attacher({ button: $("attachBtn"), chips: $("askFiles"), zones: [$("assist")], paste: [$("askForm")],
+      limits: attachLimits, blocked: () => !!blockReason() });
+    $("attachBtn").addEventListener("click", () => { const why = blockReason(); if (why) RE.announce(why, "assertive"); });
+  }).catch((err) => console.error("Attachments could not load:", err)).finally(refresh);
 })();

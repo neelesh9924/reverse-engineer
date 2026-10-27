@@ -291,6 +291,60 @@ class RunTest(unittest.TestCase):
         self.assertIn("Read(~/.ssh/**)", deny)
         self.assertIn(f"Work folder for REA output (output_directory, export paths): {work}", saw["prompt"])
 
+    def test_attached_files_reach_claude_and_reas_tools(self):
+        import base64
+        from app import subjects
+        folder = subjects.attachments_dir(self.slug)
+        capture = b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + bytes(range(256))   # a pcap: no kind the module knows
+        files = [{"name": "capture.pcap", "data": "data:application/octet-stream;base64," + base64.b64encode(capture).decode()},
+                 {"name": "run.log", "data": "data:text/plain;base64," + base64.b64encode(b"started\nfailed at 0x401000\n").decode()}]
+        call = {"path": f"{folder.as_posix()}/capture.pcap"}
+        with support.env(FAKE_CLAUDE_DUMP=self.dump, FAKE_CLAUDE_TOOL="inspect_kernel_module", FAKE_CLAUDE_ARGS=json.dumps(call)):
+            status, reply = self.client.post("/api/ask", {"slug": self.slug, "text": "what is in these?", "files": files})
+            self.assertEqual((status, reply), (200, {"ok": True}))
+            self.wait_for_idle()
+        saw = json.loads(self.dump.read_text(encoding="utf-8"))
+        self.assertEqual((folder / "capture.pcap").read_bytes(), capture)
+        self.assertEqual(self.refused(saw["replies"][0]), "", "REA was refused an attached file's path")
+        prompt = saw["prompt"]
+        self.assertIn(f"- {folder.as_posix()}/run.log (text, 27 bytes): Read it.", prompt)
+        self.assertIn(f"- {folder.as_posix()}/capture.pcap: can't be opened here", prompt)
+        self.assertIn("give one to REA's tools by its path", prompt)
+        sent = self.thread()[0]["files"]
+        self.assertEqual([(f["name"], f["kind"], f["view"]) for f in sent], [("capture.pcap", "other", False), ("run.log", "text", False)])
+        # The next question lists them as earlier files; a refused one keeps nothing and sends nothing.
+        _, saw = self.ask("and now?")
+        self.assertIn("Files the user attached earlier in this conversation:", saw["prompt"])
+        self.assertIn(f"{folder.as_posix()}/run.log", saw["prompt"])
+        status, reply = self.client.post("/api/ask", {"slug": self.slug, "text": "x", "files": [
+            {"name": "ok.txt", "data": "data:text/plain;base64,aGk="}, {"name": "empty.bin", "data": "data:,"}]})
+        self.assertIn("could not be read", reply.get("error", ""))
+        status, reply = self.client.post("/api/ask", {"slug": self.slug, "text": "x", "files": [
+            {"name": "ok.txt", "data": "data:text/plain;base64,aGk="}, {"name": "empty.bin", "data": "data:;base64,"}]})
+        self.assertIn("empty", reply.get("error", ""))
+        self.assertFalse((folder / "ok.txt").exists(), "a file sent with a refused one was kept")
+        self.assertEqual(len(self.thread()), 4, "a refused question was saved")
+
+    def test_an_attachment_is_served_back_only_from_its_folder(self):
+        import base64
+        files = [{"name": "notes.txt", "data": "data:text/plain;base64," + base64.b64encode(b"hello").decode()},
+                 {"name": "shot.png", "data": "data:image/png;base64," + base64.b64encode(support.PNG).decode()}]
+        self.client.post("/api/ask", {"slug": self.slug, "text": "look", "files": files})
+        self.wait_for_idle()
+        status, headers, body = self.client.fetch(f"/api/attachment/{self.slug}/notes.txt")
+        self.assertEqual((status, body), (200, b"hello"))
+        self.assertEqual(headers["Content-Type"], "application/octet-stream")
+        self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
+        self.assertTrue(headers["Content-Security-Policy"].startswith("sandbox"))
+        status, headers, _ = self.client.fetch(f"/api/attachment/{self.slug}/shot.png")
+        self.assertEqual((status, headers["Content-Type"]), (200, "image/png"))
+        self.assertTrue(headers["Content-Disposition"].startswith("inline;"))
+        for path in ("..%2F..%2Fsubject.json", "../../subject.json", "%2e%2e/%2e%2e/subject.json",
+                     "..%5C..%5Csubject.json", "C%3A%5CWindows%5Cwin.ini", ".text", "nul", "notes.txt%00"):
+            status, _, body = self.client.fetch(f"/api/attachment/{self.slug}/{path}")
+            self.assertEqual(status, 404, f"{path} was served: {body[:80]!r}")
+        self.assertEqual(self.client.raw(f"/api/attachment/{self.slug}/notes.txt")[0], 401, "served without the session")
+
     def test_history_is_quoted_as_data(self):
         self.ask("first question")
         _, saw = self.ask("second question")

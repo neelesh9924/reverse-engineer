@@ -1,0 +1,36 @@
+/* Attachments: the paperclip, the chips, the drop state.
+   SHARED, byte for byte, by four studios built alike, each with the same three files: app/attachments.py,
+   static/attach.js and static/attach.css (this). Change it in one studio, then copy it to all four; never edit one copy
+   alone. Its colours are each studio's own tokens, with fallbacks; the focus ring is --focus where a studio sets one,
+   else its accent (3:1 or more on every ground the tokens give). */
+.att-button { display: inline-flex; align-items: center; gap: 6px; }
+.att-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.att-chips:empty { display: none; }
+.att-chip { box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0;
+  height: 28px; padding: 0 2px 0 4px; border: 1px solid var(--line, #e4e7ed); border-radius: var(--radius-s, 8px);
+  background: var(--surface, #ffffff); color: var(--text-2, #465061); font: 12px/1 var(--font, system-ui, sans-serif);
+  text-decoration: none; }
+a.att-chip { padding-right: 8px; cursor: pointer; }
+a.att-chip:hover { background: var(--surface-2, #f1f3f7); }
+a.att-chip:focus-visible { outline: 2px solid var(--focus, var(--accent, #3355e0)); outline-offset: 2px; }
+.att-chip.is-gone { border-style: dashed; padding-right: 8px; }
+.att-thumb, .att-mark { flex: none; width: 20px; height: 20px; border-radius: 4px; background: var(--surface-2, #f1f3f7); }
+.att-thumb { object-fit: cover; }
+.att-mark { display: grid; place-items: center; color: var(--text-2, #465061); }
+.att-icon { flex: none; }
+.att-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--text, #141821); }
+.att-size { flex: none; white-space: nowrap; color: var(--text-2, #465061); }
+/* a chip's ×: a 24 px target, its ring inside it, against the chip */
+.att-remove { all: unset; box-sizing: border-box; flex: none; display: grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 6px; color: var(--text-2, #465061); cursor: pointer; }
+.att-remove:hover { background: var(--surface-2, #f1f3f7); color: var(--text, #141821); }
+.att-remove:focus-visible { outline: 2px solid var(--focus, var(--accent, #3355e0)); outline-offset: -2px; color: var(--text, #141821); }
+.att-error { margin: 6px 0 0; color: var(--bad, #b92c1b); font-size: 12.5px; line-height: 1.45; }
+.att-error:empty { display: none; }
+.att-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* while files are dragged over the window: each drop zone of the attacher that takes them, covered, saying so */
+[data-att-drop]::after { content: attr(data-att-drop); position: absolute; inset: 8px; z-index: 30; display: grid;
+  place-items: center; padding: 16px; border: 2px dashed var(--accent, #3355e0); border-radius: var(--radius, 12px);
+  background: var(--accent-soft, #e9eeff); background: color-mix(in srgb, var(--accent-soft, #e9eeff) 92%, transparent);
+  color: var(--accent-ink, #2843bb); font: 600 14px/1.4 var(--font, system-ui, sans-serif); text-align: center;
+  pointer-events: auto; }

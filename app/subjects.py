@@ -219,6 +219,13 @@ def work_dir(slug):
     return path
 
 
+def attachments_dir(slug):
+    """work/attachments: the files the user attached to the conversation (readable copies in its
+    hidden .text/). Inside the work folder, so Claude's run can Read them and hand them to REA's
+    tools by path, as the studio's path checks allow. attachments.save makes it."""
+    return work_dir(slug) / "attachments"
+
+
 # ---- what the user types ----
 
 def clean_path(text):

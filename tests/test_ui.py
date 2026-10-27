@@ -454,6 +454,41 @@ class PageSmokeTest(unittest.TestCase):
                    "!!document.querySelector('#pn-analysis .field-error:not([hidden])')",
                    "Enter in an analysis setting did nothing")
 
+    def test_25_a_dropped_file_goes_with_the_question(self):
+        self.go(self.httpd.demo["app"])
+        self.until("!document.getElementById('subjectPage').hidden && !document.getElementById('attachBtn').hidden",
+                   "the Ask panel has no paperclip")
+        self.until("!(RE.state.job && RE.state.job.status === 'running')", "an earlier run did not end", timeout=60)
+        count = self.page.evaluate("document.querySelectorAll('#messages > *').length")
+        # Dropped on the Ask panel, as from Explorer: a chip in the composer.
+        self.page.evaluate("{ const dt = new DataTransfer();"
+                           "dt.items.add(new File(['started\\nfailed at 0x401000\\n'], 'run.log', { type: 'text/plain' }));"
+                           "document.getElementById('assist').dispatchEvent(new DragEvent('drop', "
+                           "{ dataTransfer: dt, bubbles: true, cancelable: true })); }")
+        self.until("document.querySelectorAll('#askFiles .att-chip').length === 1 && "
+                   "!!document.querySelector('#askFiles .att-remove[aria-label=\"Remove run.log\"]')",
+                   "the dropped file has no chip in the composer")
+        self.page.evaluate("{ const box = document.getElementById('askText'); box.focus(); box.value = 'Where did it fail?';"
+                           "box.dispatchEvent(new Event('input', {bubbles: true}));"
+                           "document.getElementById('sendBtn').click(); }")
+        self.until(f"document.querySelectorAll('#messages > *').length >= {count + 2} && "
+                   "/Done\\./.test(document.getElementById('messages').lastElementChild.textContent)",
+                   "Claude's answer did not appear", timeout=60)
+        self.assertEqual(self.page.evaluate("document.querySelectorAll('#askFiles .att-chip').length"), 0,
+                         "the sent file stayed in the composer")
+        # On the sent question: a chip that downloads the file, served back sandboxed.
+        sent = self.page.evaluate("(async () => { const a = [...document.querySelectorAll('#messages .msg.user "
+                                  ".msg-files a.att-chip')].pop(); if (!a) return null; const r = await fetch(a.href);"
+                                  "return [a.getAttribute('download'), a.getAttribute('aria-label'), r.status,"
+                                  "r.headers.get('content-disposition'), r.headers.get('content-security-policy'),"
+                                  "await r.text()]; })()")
+        self.assertIsNotNone(sent, "the sent question shows no chip for its file")
+        download, label, status, disposition, policy, text = sent
+        self.assertEqual((download, status, text), ("run.log", 200, "started\nfailed at 0x401000\n"))
+        self.assertIn("Download run.log", label)
+        self.assertTrue(disposition.startswith("attachment;") and policy.startswith("sandbox"), (disposition, policy))
+        self.assert_view_is_sound("subject page after sending a file")
+
     def test_99_no_errors_along_the_way(self):
         self.assert_no_page_errors("while using the page")
 

@@ -31,8 +31,8 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import backends, catalog, checks, claude, config, evidence, mcp, settings, subjects, webtarget
-from .assistant import Assistant, parse_error
+from . import attachments, backends, catalog, checks, claude, config, evidence, mcp, settings, subjects, webtarget
+from .assistant import ATTACH_LIMITS, Assistant, parse_error
 from .claude import ClaudeRunner
 from .rea import Engines
 from .webtarget import WebTargets
@@ -471,7 +471,8 @@ class Studio:
                             "version": rea.get("version") or (parsed["version"] if parsed else "")},
                 "setup": {"rea_ready": ready("rea"), "claude_ready": ready("claude"), "node_ready": ready("node"),
                           "notice_seen": bool(getattr(config, "NOTICE_SEEN", False))},
-                "permissions": {"claude_destructive": bool(getattr(config, "CLAUDE_DESTRUCTIVE", False))}}
+                "permissions": {"claude_destructive": bool(getattr(config, "CLAUDE_DESTRUCTIVE", False))},
+                "attach": {"limits": ATTACH_LIMITS}}
 
     # ---- Claude's calls through /mcp ----
 
@@ -600,12 +601,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- replies ----
 
-    def _send(self, status, body=b"", content_type="application/json; charset=utf-8", headers=()):
+    def _send(self, status, body=b"", content_type="application/json; charset=utf-8", headers=(),
+              security=SECURITY_HEADERS):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        for name, value in SECURITY_HEADERS:
+        for name, value in security:
             self.send_header(name, value)
         for name, value in headers:
             self.send_header(name, value)
@@ -634,6 +636,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "Not found."}, 404)
         ctype = _TYPES.get(target.suffix.lower()) or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self._send(200, target.read_bytes(), ctype)
+
+    def _attachment(self, rest):
+        """A file attached to the conversation, opened from its chip: /api/attachment/<slug>/<name>.
+        The name is checked as text first (parts_of: one plain name; no device name), then resolved
+        and kept in the subject's attachments folder. Served as attachments.headers says: a picture
+        or a PDF to view, anything else to download, sandboxed, never sniffed."""
+        slug, _, name = rest.partition("/")
+        parts = parts_of(name)
+        if not parts or len(parts) != 1 or not subjects.exists(slug):
+            return self._json({"error": "Not found."}, 404)
+        folder = subjects.attachments_dir(slug)
+        if config.local_path_problem(str(folder / parts[0])):
+            return self._json({"error": "Not found."}, 404)
+        root = folder.resolve()
+        target = (root / parts[0]).resolve()
+        record = attachments.describe(root, parts[0]) if target.parent == root and target.is_file() else None
+        try:
+            body = target.read_bytes() if record else None
+        except OSError:
+            body = None
+        if body is None:
+            return self._json({"error": "Not found."}, 404)
+        said = attachments.headers(record)
+        kind = said.pop("Content-Type")
+        # Its own policy in place of the page's (two would both apply); the rest of the page's stay.
+        security = tuple((key, value) for key, value in SECURITY_HEADERS if key not in said)
+        return self._send(200, body, kind, tuple(said.items()), security)
 
     def _body(self):
         try:
@@ -732,6 +761,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self._sessions(slug))
         if url.path == "/api/settings":
             return self._json({"settings": settings.public(), "checks": studio.checks})
+        if url.path.startswith("/api/attachment/"):
+            return self._attachment(url.path[len("/api/attachment/"):])
         return self._json({"error": "Not found."}, 404)
 
     def do_DELETE(self):
@@ -874,7 +905,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/subjects/new":
             return self._json(self._new_subject(body))
         if path == "/api/ask":
-            error = assistant.ask(slug, body.get("text"), prompt=body.get("prompt"))
+            error = assistant.ask(slug, body.get("text"), prompt=body.get("prompt"), files=body.get("files"))
         elif path == "/api/stop":
             return self._json(self._stop())
         elif path == "/api/clear":

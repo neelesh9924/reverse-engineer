@@ -64,6 +64,12 @@ has the security model.
 - `app/assistant.py`: one Claude job at a time, the conversation, and turning tool results into
   findings (`entry_for`). `app/evidence.py`: findings on disk, per subject.
 - `app/catalog.py`: reads REA's built `dist/mcp-catalog.json` and groups the tools (`_RULES`).
+- `app/attachments.py`, `static/attach.js`, `static/attach.css` and `tests/test_attachments.py` are
+  SHARED byte for byte with sibling studios: never edit a copy here alone; change it in one studio,
+  then copy it to all, so the copies stay identical.
+- A question's files go to `subjects.attachments_dir` (`work/attachments`, which Claude's Read and
+  `claude_path_problem` both allow), are told to Claude by `attachments.for_claude`, and come back
+  from `/api/attachment/<slug>/<name>` (`parts_of` first).
 - `app/subjects.py`, `app/settings.py`, `app/checks.py`, `app/config.py`, `app/webtarget.py`,
   `app/winjob.py`: subjects on disk, Settings, readiness checks, configuration, a website
   subject's browser, Windows job objects.

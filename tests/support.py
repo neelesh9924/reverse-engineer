@@ -7,6 +7,7 @@ from REA's own dist/mcp-catalog.json (trimmed of long descriptions). Where the f
 says so, a tool is flagged destructive even though REA itself does not flag it
 (start_frida_session), so the confirmation paths have a session tool to exercise.
 """
+import base64
 import contextlib
 import json
 import os
@@ -21,6 +22,10 @@ REPO = Path(__file__).resolve().parent.parent
 TESTS = Path(__file__).resolve().parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+
+# A picture, 16 x 12 pixels, red: tests/test_attachments.py (shared with sibling studios) imports
+# it from here.
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAABAAAAAMCAIAAADkharWAAAAGklEQVR4nGM8IafBQApgIkk1w6gG4sBwCFYAiKYBJlhTV74AAAAASUVORK5CYII=")
 
 REA_VERSION = "6.8.0"
 UUID_PATTERN = ("^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|"

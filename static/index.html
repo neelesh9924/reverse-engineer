@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/static/css/render.css">
   <link rel="stylesheet" href="/static/css/tools.css">
   <link rel="stylesheet" href="/static/css/panels.css">
+  <link rel="stylesheet" href="/static/attach.css">
 </head>
 <body>
   <a id="skip" class="skip-link" href="#main">Skip to main content</a>
@@ -108,9 +109,11 @@
       </div>
       <form class="assist-form" id="askForm" novalidate>
         <div class="composer" id="composer">
+          <div id="askFiles" aria-label="Files to send with your question"></div>
           <label class="sr-only" for="askText">Ask Claude about this subject</label>
           <textarea id="askText" rows="1" aria-describedby="askHint askKeys" aria-keyshortcuts="Control+/"></textarea>
           <div class="composer-foot">
+            <button id="attachBtn" class="btn ghost small square" type="button" aria-label="Attach files" hidden></button>
             <button id="workflowBtn" class="btn ghost small" type="button" hidden title="Start one of REA’s step-by-step workflows"><span>Workflows</span></button>
             <span class="grow"></span>
             <button id="stopBtn" class="btn small danger" type="button" hidden><span>Stop</span></button>

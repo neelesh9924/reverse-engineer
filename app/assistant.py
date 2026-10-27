@@ -5,12 +5,14 @@ as a finding in the subject's evidence store (app/evidence.py).
 A run belongs to one subject. While it is working, the studio keeps that subject's engine
 the running one; asking about another subject is refused until this run ends or is stopped.
 """
+import base64
+import binascii
 import json
 import secrets
 import threading
 import time
 
-from . import catalog, claude, config, evidence, subjects
+from . import attachments, catalog, claude, config, evidence, subjects
 
 MAX_ACTIVITY = 200         # tool-call lines kept for a running job
 MAX_HISTORY = 24           # prior conversation turns put into the prompt
@@ -18,6 +20,9 @@ MAX_STEPS = 50             # run steps saved on the final message
 MAX_ASK = 50000            # characters in one question
 MAX_TEXT = 200000          # content text kept on a finding that has no structured result
 MAX_ARGUMENT = 4000        # characters in one workflow argument
+# Files sent with one question: they come as base64 in the request, which the server caps at
+# 16 MB (server.MAX_BODY), so 11 MB of files in all. The page reads these from /api/state.
+ATTACH_LIMITS = {"file": 11 * attachments.MB, "message": 11 * attachments.MB, "count": 12}
 
 
 class Job:
@@ -32,6 +37,7 @@ class Job:
         self.cancel = threading.Event()
         self.error = ""
         self.progress = None           # {progress, total, message} from REA's progress notifications
+        self.files = []                # the records of the files sent with the question (attachments.save)
 
     def seconds(self):
         return int(time.monotonic() - self.started)
@@ -182,6 +188,70 @@ def check_prompt(prompt):
     return {"name": known["name"], "title": known["title"], "arguments": values}, None
 
 
+def files_from(raw):
+    """The files the page sent with a question ([{name, data: a base64 data: URL}]) as
+    ([(name, bytes)], ""), or (None, the problem in words). Count and total are held to
+    ATTACH_LIMITS here; each file's own size, by attachments.save."""
+    if raw is None or raw == []:
+        return [], ""
+    most = ATTACH_LIMITS
+    if not isinstance(raw, list):
+        return None, "The attached files could not be read. Attach them again."
+    if len(raw) > most["count"]:
+        return None, f"Attach up to {most['count']} files at a time."
+    found, total = [], 0
+    for item in raw:
+        name = item.get("name") if isinstance(item, dict) else None
+        data = item.get("data") if isinstance(item, dict) else None
+        head, comma, encoded = data.partition(",") if isinstance(data, str) else ("", "", "")
+        if not isinstance(name, str) or not comma or not head.startswith("data:") or not head.endswith(";base64"):
+            return None, "An attached file could not be read. Attach it again."
+        try:
+            body = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            return None, f"{attachments.safe_name(name)} could not be read. Attach it again."
+        total += len(body)
+        if total > most["message"]:
+            return None, (f"The attached files come to more than {attachments.size_words(most['message'])}: "
+                          "send some of them with the next question.")
+        found.append((name, body))
+    return found, ""
+
+
+def _keep_files(slug, files):
+    """Save a question's files in the subject's attachments folder: their records. When one is
+    refused (attachments.Refused) or cannot be written, none of them is kept."""
+    folder = subjects.attachments_dir(slug)
+    kept = []
+    try:
+        for name, body in files:
+            kept.append(attachments.save(folder, name, body, ATTACH_LIMITS))
+    except Exception:
+        _forget_files(slug, kept)
+        raise
+    return [{**record, "view": record["mime"] in attachments.VIEWABLE} for record in kept]
+
+
+def _forget_files(slug, records):
+    try:
+        folder = subjects.attachments_dir(slug)
+    except subjects.SubjectError:
+        return   # the subject, its folder with them, is gone
+    for record in records:
+        for relative in (record.get("path"), record.get("text")):
+            if relative:
+                try:
+                    (folder / relative).unlink()
+                except OSError:
+                    pass
+
+
+def _plain_name(name):
+    """Whether a kept file's name (from the conversation) is one plain name in the folder."""
+    return (isinstance(name, str) and bool(name) and not name.startswith(".")
+            and not any(c in name for c in "/\\:\0"))
+
+
 def _quote(text, tag):
     """Text placed inside one of the prompt's delimited blocks, unable to close it early."""
     return (text or "").replace(f"</{tag}", f"<\\/{tag}")
@@ -270,7 +340,7 @@ class Assistant:
 
     # ---- running ----
 
-    def ask(self, slug, text, prompt=None, kind="ask"):
+    def ask(self, slug, text, prompt=None, kind="ask", files=None):
         text = text.strip() if isinstance(text, str) else ""
         if not subjects.exists(slug):
             return "That subject is no longer there."
@@ -283,6 +353,9 @@ class Assistant:
             return "Type something to ask."
         if len(text) > MAX_ASK:
             return f"Keep a question under {MAX_ASK:,} characters."
+        files, problem = files_from(files)
+        if problem:
+            return problem
         if catalog.load() is None:
             # Every REA call Claude makes is checked against the catalogue; without it nothing can be.
             return ("REA's tool catalogue cannot be read (REA may be rebuilding), so Claude cannot use REA "
@@ -295,7 +368,7 @@ class Assistant:
             # cannot close the engine or browser this run is about to use.
             self.pending = slug
             try:
-                job, history, problem = self._prepare(slug, text, chosen, kind)
+                job, history, problem = self._prepare(slug, text, chosen, kind, files)
             finally:
                 self.pending = None
             if problem:
@@ -303,9 +376,10 @@ class Assistant:
         threading.Thread(target=self._work, args=(job, text, history, chosen), name="claude-run", daemon=True).start()
         return None
 
-    def _prepare(self, slug, text, chosen, kind):
-        """Start the subject's engine (and a website's browser), save the question, and make the
-        job. (job, history, None), or (None, None, the problem). Called with the lock held."""
+    def _prepare(self, slug, text, chosen, kind, files=()):
+        """Start the subject's engine (and a website's browser), keep the question's files, save
+        the question, and make the job. (job, history, None), or (None, None, the problem). Called
+        with the lock held."""
         try:
             # Start (or reuse) this subject's engine before the run; a clear message if it can't.
             try:
@@ -325,10 +399,23 @@ class Assistant:
             # guess which message is the new one.
             history = subjects.thread(slug)[-MAX_HISTORY:]
             extra = {"prompt": {"name": chosen["name"], "arguments": chosen["arguments"]}} if chosen else {}
-            self._add(slug, "user", text or f"Run REA’s “{chosen['title']}” workflow.", **extra)
         except (subjects.SubjectError, OSError) as exc:
             return None, None, f"The conversation could not be saved: {exc}"
+        try:
+            kept = _keep_files(slug, files) if files else []
+        except attachments.Refused as exc:
+            return None, None, str(exc)
+        except (subjects.SubjectError, OSError) as exc:
+            return None, None, f"The attached files could not be kept: {exc}"
+        if kept:
+            extra["files"] = kept
+        try:
+            self._add(slug, "user", text or f"Run REA’s “{chosen['title']}” workflow.", **extra)
+        except (subjects.SubjectError, OSError) as exc:
+            _forget_files(slug, kept)
+            return None, None, f"The conversation could not be saved: {exc}"
         job = Job(slug, kind, secrets.token_urlsafe(24))
+        job.files = kept
         self.job = job
         self.bump()
         return job, history, None
@@ -347,7 +434,7 @@ class Assistant:
                             else claude.readable_places(target.get("path", ""), bool(target.get("folder"))))
             work = str(subjects.work_dir(job.slug))
             req = claude.RunRequest(
-                prompt=self._prompt(job.slug, meta, text, history, chosen, workflow),
+                prompt=self._prompt(job.slug, meta, text, history, chosen, workflow, job.files),
                 system=claude.system_prompt(website=subjects.is_website(meta), destructive_allowed=allowed),
                 cwd=work,
                 mcp_url=f"http://127.0.0.1:{self.port}/mcp", mcp_token=job.token,
@@ -451,7 +538,34 @@ class Assistant:
             bits.append(result.model)
         return " · ".join(bits)
 
-    def _prompt(self, slug, meta, text, history, chosen, workflow):
+    @staticmethod
+    def _attached(slug, history, files):
+        """The prompt's lines for the files the user attached: this question's, then the earlier
+        turns' that are still there, each as attachments.for_claude says, and how REA gets them."""
+        folder = subjects.attachments_dir(slug)
+        base = folder.as_posix()
+        now = {record["path"] for record in files}
+        earlier = []
+        for message in history:
+            listed = message.get("files")
+            for item in listed if isinstance(listed, list) else []:
+                name = item.get("path") if isinstance(item, dict) else None
+                if _plain_name(name) and name not in now:
+                    now.add(name)
+                    record = attachments.describe(folder, name)
+                    if record:
+                        earlier.append(record)
+        lines = []
+        if files:
+            lines += ["Files the user attached to this request:", *attachments.for_claude(files, base)]
+        if earlier:
+            lines += ["Files the user attached earlier in this conversation:", *attachments.for_claude(earlier, base)]
+        if lines:
+            lines += [f"Attached files are in {base}, in the work folder: give one to REA's tools by its path, "
+                      "as you would the target.", ""]
+        return lines
+
+    def _prompt(self, slug, meta, text, history, chosen, workflow, files=()):
         target = meta.get("target") or {}
         if subjects.is_website(meta):
             info = self.web.info(slug) if self.web is not None else None
@@ -494,6 +608,7 @@ class Assistant:
                        "info": "Studio note"}.get(role, str(role))
                 lines.append(f"{who}: {_quote(message['text'].strip(), 'prior_conversation')}")
             lines += ["</prior_conversation>", ""]
+        lines += self._attached(slug, history, files)
         lines.append("The user's request:")
         lines.append(text or f"Follow REA's “{chosen['title']}” workflow above.")
         return "\n".join(lines)

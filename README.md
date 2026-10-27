@@ -68,6 +68,13 @@ subjects (no real engine, Claude or target), captured by `py -3 dev/shots.py`.
   Stop ends a run at once. Claude cannot run REA tools that change state or start a program
   unless you allow it in Settings, and its REA calls may only name the target, its folder and the
   subject's work folder (SECURITY.md has the details).
+- **Attachments.** Give a question any file: the paperclip, a drop on the Ask panel, or a paste
+  (a screenshot too), up to 12 files and 11 MB in all with one question. They are kept in the
+  subject's work folder (`work/attachments`, with readable copies of Word, Excel, PowerPoint and
+  zip files in its hidden `.text` folder), so Claude can read them and hand a binary, APK,
+  capture or log to REA's tools by its path, as it would in a terminal. What Claude reads of them
+  is sent to Anthropic. A sent question shows its files: a picture or a PDF opens in a new
+  window, anything else downloads.
 - **Tools page.** Every tool in REA's catalogue (229 in rea-agents 6.8.0), grouped, searchable
   and runnable directly, each with a form built from the tool's own input schema: types,
   choices, required fields, limits and nested JSON are all checked before the call. Paths are
