@@ -429,6 +429,10 @@ def save(folder, name, body, limits=None):
     if len(body) > limits["file"]:
         raise Refused(f"{label} is {size_words(len(body))}: a file can be up to {size_words(limits['file'])}.")
     found = sniff(body, label)
+    if found["kind"] == "other":
+        claimed = _claimed(_split(label)[1])
+        if claimed:   # its name says a kind whose bytes always say so, and they say nothing: a damaged file
+            raise Refused(f"{label} isn’t the {claimed} it says it is: it may be damaged. Attach it again.")
     kept = _named(label, found)
     words = _readable(body, found, kept)   # before anything is written: one that cannot be read is not kept
     folder = Path(folder)
@@ -442,6 +446,15 @@ def save(folder, name, body, limits=None):
     path = folder / final
     _known[str(path)] = (_stamp(path), dict(record))
     return record
+
+
+def _claimed(ext):
+    """What an extension says a file is, said plainly ("picture", "PDF"…), when it names a kind whose bytes always show
+    it (a picture, a PDF, an office file, a sound, a video, an archive); "" for any other, or none."""
+    for kind, keep, also, words in TYPES.values():
+        if kind in ("picture", "pdf", "office", "audio", "video", "archive") and ext and ext in (keep, *also):
+            return "picture" if kind == "picture" else re.sub(r"^an? ", "", words.split(",")[0])
+    return ""
 
 
 def _record(relative, found, body):

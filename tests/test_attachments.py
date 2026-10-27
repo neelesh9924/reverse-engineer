@@ -240,6 +240,16 @@ class KindsTest(Folder):
         self.assertIn("Since 2009", (self.folder / ".text" / "story.docx.txt").read_text(encoding="utf-8"),
                       "a Word document sent as a zip is read as the Word document it is")
 
+    def test_a_damaged_file_whose_name_says_what_it_is_is_refused(self):
+        junk = b"\x00\x13\x37\x00" * 8   # no kind's signature, and not text
+        for name, said in (("front.png", "picture"), ("menu.pdf", "PDF"), ("prices.xlsx", "Excel workbook"),
+                           ("song.mp3", "MP3 sound"), ("tour.mp4", "MP4 video"), ("photos.zip", "zip archive")):
+            with self.assertRaises(Refused, msg=name) as caught:
+                save(self.folder, name, junk)
+            self.assertEqual(str(caught.exception), f"{name} isn’t the {said} it says it is: it may be damaged. Attach it again.")
+        self.assertEqual(list(self.folder.iterdir()) if self.folder.exists() else [], [], "nothing written")
+        self.assertEqual(save(self.folder, "data.bin", junk)["kind"], "other", "a name that says no kind keeps it as a file")
+
     def test_text_in_an_older_windows_encoding_or_utf16_gets_a_utf8_copy(self):
         csv_body = "Drink,Price\nCaf\xe9 latte,120\n".encode("cp1252")
         record = save(self.folder, "prices.csv", csv_body)
