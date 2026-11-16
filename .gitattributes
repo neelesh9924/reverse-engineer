@@ -1,0 +1,7 @@
+# Text files are LF everywhere, whatever core.autocrlf says.
+* text=auto eol=lf
+# Windows Script Host is a CRLF-native tool.
+*.vbs text eol=crlf
+*.ico binary
+*.png binary
+*.webp binary

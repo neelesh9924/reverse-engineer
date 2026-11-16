@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      # The headless-browser smoke test (tests/test_ui.py) is for local runs.
+      REVERSE_ENGINEER_SKIP_UI: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -t tests -v 2>&1 | tee unit.log
+
+      # A green run with fewer tests still fails (CLAUDE.md, "Tests only grow").
+      # The floor is the repo variable MIN_TESTS (Settings, Secrets and
+      # variables, Actions, Variables), raised when tests are added. An unset
+      # floor fails too, so the guard can't quietly switch itself off.
+      - name: Test count guard
+        shell: bash
+        run: |
+          count=$(grep -oE '^Ran [0-9]+ tests?' unit.log | grep -oE '[0-9]+' | tail -1)
+          echo "tests: ${count:-none} (floor ${{ vars.MIN_TESTS }})"
+          test "${count:-0}" -ge "${{ vars.MIN_TESTS }}"
