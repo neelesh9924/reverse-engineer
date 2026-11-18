@@ -145,6 +145,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .field-label { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
 .field-label .opt { font-weight: 400; color: var(--text-3); }
 .field-label .req { color: var(--bad); }
+.field-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.found-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.found-row .input { flex: 1 1 auto; min-width: 0; }
 .field-hint { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
 .field-error { display: flex; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--bad); }
 .form-error { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bad-soft); color: var(--bad); font-size: 13px; }

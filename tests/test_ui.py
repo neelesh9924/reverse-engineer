@@ -489,6 +489,97 @@ class PageSmokeTest(unittest.TestCase):
         self.assertTrue(disposition.startswith("attachment;") and policy.startswith("sandbox"), (disposition, policy))
         self.assert_view_is_sound("subject page after sending a file")
 
+    def test_26_what_the_studio_found_is_in_its_box_and_found_again(self):
+        """What the studio finds by itself (the owner's word, 18 Nov 2026), as their other studios show it: the whole path
+        in the box, Found by itself beside the name, and Find it once the box is emptied. Left as found, it is saved
+        empty: it stays the studio's to find. A path of the user's own shows no chip."""
+        kept = self.tmp / "data" / "settings.json"
+        saved = lambda: json.loads(kept.read_text(encoding="utf-8"))  # noqa: E731
+        self.go(self.httpd.demo["app"])
+        self.go("~settings")
+        # a backend's box holds what was found for it as soon as its row is drawn (here: the browser these checks run in)
+        self.until("!!document.querySelector('#settingsPage [data-path=\"chrome\"]')", "Settings shows no browser backend")
+        first = self.page.evaluate("[document.querySelector('#settingsPage [data-path=\"chrome\"]').value,"
+                                   " (RE.state.checks.backends.find((b) => b.id === 'chrome') || {}).found_path || '']")
+        self.assertTrue(first[1], "the browser these checks run in was not found")
+        self.assertEqual(first[0], first[1], "the browser backend's box did not hold its found path when Settings opened")
+        box, chip, find = ("document.getElementById('set-in-claude_bin')", "document.querySelector('[data-found=\"claude\"]')",
+                           "document.querySelector('[data-find=\"claude\"]')")
+        found = "(RE.state.checks.claude && RE.state.checks.claude.found && RE.state.checks.claude.path)"
+        seen = "((el) => !!el && !el.hidden && el.getClientRects().length > 0)"
+        # Claude Code (the demo's stand-in): the path its check found, in the box, with the chip and no Find it
+        self.until(f"(() => {{ const b = {box}, c = {chip}; return !!b && !!b.value && b.value === {found} && {seen}(c)"
+                   f" && c.textContent === 'Found by itself' && c.classList.contains('ok') && {find}.hidden; }})()",
+                   "Claude Code's box does not hold the path it found, with Found by itself beside its name")
+        # emptied: the chip goes and Find it comes; Find it looks again, puts the path back and leaves focus in the box
+        self.page.evaluate(f"{{ const b = {box}; b.focus(); b.value = ''; b.dispatchEvent(new Event('input', {{bubbles: true}})); }}")
+        self.until(f"{seen}({find}) && {chip}.hidden", "an emptied box offers no Find it, or keeps its chip")
+        self.assertEqual(self.page.evaluate(f"{find}.getAttribute('aria-label')"), "Find it: Claude Code")
+        self.page.evaluate(f"{{ const f = {find}; f.focus(); f.click(); }}")
+        self.until(f"(() => {{ const b = {box}; return b.value === {found} && {seen}({chip}) && {find}.hidden"
+                   " && document.activeElement === b; })()", "Find it did not put the found path back in the box", timeout=60)
+        # left as found, it is saved empty (the stand-in's command is no program the server would take as a path)
+        self.page.evaluate("document.querySelector('#set-claude button[type=submit]').click()")
+        self.until(f"[...document.querySelectorAll('#set-claude .result')].some((n) => n.textContent.trim() === 'Saved.')"
+                   f" || {box}.getAttribute('aria-invalid') === 'true'", "saving Claude's settings said nothing")
+        self.assertIsNone(self.page.evaluate(f"{box}.getAttribute('aria-invalid')"),
+                          self.page.evaluate("document.getElementById('set-claude').textContent"))
+        self.assertEqual(saved().get("claude_bin", ""), "")
+        self.until(f"{seen}({chip}) && {box}.value === {found}", "after saving, the box no longer shows what was found")
+        # a path of the user's own: kept as given, with no chip, when Settings is opened again and the checks are drawn
+        own = sys.executable
+        self.page.evaluate(f"{{ const b = {box}; b.value = {json.dumps(own)}; b.dispatchEvent(new Event('input', {{bubbles: true}}));"
+                           " document.querySelector('#set-claude button[type=submit]').click(); }")
+        for _ in range(100):
+            if saved().get("claude_bin") == own:
+                break
+            self.page.pump(0.2)
+        self.assertEqual(saved().get("claude_bin"), own)
+        self.until("document.querySelector('#set-claude button[type=submit]').getAttribute('aria-disabled') !== 'true'",
+                   "the save did not finish")
+        self.go(self.httpd.demo["app"])
+        self.until("document.getElementById('settingsPage').hidden", "Settings did not close")
+        self.go("~settings")
+        self.until(f"(() => {{ const b = {box}; return !!b && b.value === {json.dumps(own)} && !!{found} && {chip}.hidden"
+                   f" && {find}.hidden; }})()", "a path of the user's own was replaced, or shows a chip or Find it")
+        # emptied, Find it sets the user's path aside and finds the studio's again
+        self.page.evaluate(f"{{ const b = {box}; b.value = ''; b.dispatchEvent(new Event('input', {{bubbles: true}}));"
+                           f" const f = {find}; f.focus(); f.click(); }}")
+        self.until(f"(() => {{ const b = {box}; return b.value === {found} && {seen}({chip}) && {find}.hidden; }})()",
+                   "Find it did not set the user's own path aside and find the studio's again", timeout=60)
+        self.assertEqual(saved().get("claude_bin", ""), "")
+        # the REA folder the demo names itself: the user's own, so no chip and no Find it
+        rea = self.page.evaluate("[document.getElementById('set-in-rea_dir').value, document.querySelector('[data-found=\"rea\"]').hidden,"
+                                 " document.querySelector('[data-find=\"rea\"]').hidden]")
+        self.assertEqual(rea, [saved()["rea_dir"], True, True])
+        # Node and the backends, as this PC's checks found them: each found path in its box with the chip, else Not found
+        self.until("RE.state.checks && !RE.state.checks.checking && Array.isArray(RE.state.checks.backends)", "the checks did not settle", timeout=60)
+        rows = self.page.evaluate(
+            "(() => { const c = RE.state.checks, out = [];"
+            " const add = (name, path, own) => { const chip = document.querySelector(`[data-found=\"${name}\"]`);"
+            "   const input = chip.closest('.field').querySelector('input');"
+            "   out.push([name, path, own, input.value, chip.hidden ? '' : chip.textContent, input.dataset.found || '']); };"
+            " add('node', c.node && c.node.found ? c.node.path || '' : '', '');"
+            " for (const b of c.backends) if (b.configurable) add(`bk-${b.id}`, b.found_path || '', b.path || '');"
+            " return out; })()")
+        self.assertTrue(any(name == "bk-chrome" and path for name, path, *_ in rows), "the browser these checks run in was not found")
+        for name, path, own_path, value, chip_text, marked in rows:
+            if own_path:
+                continue
+            if path:
+                self.assertEqual((value, chip_text, marked), (path, "Found by itself", path), name)
+            else:
+                self.assertEqual((value, chip_text), ("", "Not found"), name)
+        # Save backends with them as found: none is saved as the user's own path
+        self.page.evaluate("[...document.querySelectorAll('#settingsPage button')].find((b) => b.textContent.trim() === 'Save backends').click()")
+        self.until("!!document.querySelector('#set-backends .results .result')", "saving the backends said nothing")
+        self.assertTrue(self.page.evaluate("!!document.querySelector('#set-backends .results .result.ok')"),
+                        self.page.evaluate("document.querySelector('#set-backends .results').textContent"))
+        found_paths = {name[3:]: path for name, path, *_ in rows if name.startswith("bk-")}
+        for key, entry in saved().get("backends", {}).items():
+            self.assertFalse(entry.get("path") and entry.get("path") == found_paths.get(key), f"{key}: its found path was saved as the user's own")
+        self.assert_view_is_sound("Settings page with found paths")
+
     def test_99_no_errors_along_the_way(self):
         self.assert_no_page_errors("while using the page")
 

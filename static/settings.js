@@ -15,8 +15,9 @@ window.studioSettings = (() => {
 
   // ---------- small pieces ----------
   function setText(el, text) { const t = String(text ?? ""); if (el.textContent !== t) el.textContent = t; }
-  // A field: <label for>, the hint and any error tied to the control by aria-describedby.
-  function field(label, input, hint) {
+  // A field: <label for>, the hint and any error tied to the control by aria-describedby. `found` (foundParts) puts its
+  // chip beside the label and its Find it beside the box.
+  function field(label, input, hint, found) {
     const id = input.id || `set-in-${input.name || Math.random().toString(36).slice(2)}`;
     input.id = id;
     const hintEl = hint ? (hint instanceof Node ? hint : ui.h("span", { class: "field-hint" }, hint)) : null;
@@ -32,15 +33,98 @@ window.studioSettings = (() => {
       describe();
     };
     describe();
-    return ui.h("div", { class: "field" }, ui.h("label", { class: "field-label", for: id }, label), input, hintEl, err);
+    const labelEl = ui.h("label", { class: "field-label", for: id }, label);
+    return ui.h("div", { class: "field" }, found ? ui.h("span", { class: "field-head" }, labelEl, found.chip) : labelEl,
+      found ? ui.h("span", { class: "found-row" }, input, found.find) : input, hintEl, err);
   }
   function text(name, attrs) {
     return ui.h("input", { class: "input", name, id: `set-in-${name}`, value: saved[name] ?? "", autocomplete: "off", spellcheck: "false", ...attrs });
   }
+  // A box left as the studio found it is saved empty: it stays the studio's to find.
+  const asSaved = (el) => (el.dataset.found && el.value.trim() === el.dataset.found ? "" : el.value.trim());
   function values(form) {
     const out = {};
-    for (const el of form.querySelectorAll("input[name]")) out[el.name] = el.value.trim();
+    for (const el of form.querySelectorAll("input[name]")) out[el.name] = asSaved(el);
     return out;
+  }
+
+  // ---------- what the studio finds by itself ----------
+  // A program or folder the studio finds by itself (the owner's word, 18 Nov 2026), as their other studios show it: its
+  // whole path in the box, a chip beside the name that says it was found (or not), and Find it once the box is emptied.
+  // Left as found, it stays the studio's to find (asSaved). A path typed in is the user's, kept as given.
+  let foundFields = {};   // name -> { input, chip, find, own(), clear(), path: what was found ("" none, null not asked yet), typed, finding }
+  function foundParts(name, input, own, clear, what) {
+    const chip = ui.h("span", { class: "chip", "data-found": name, hidden: true });
+    const find = ui.h("button", { class: "btn small", type: "button", "data-find": name, "aria-label": `Find it: ${what}`, hidden: true }, "Find it");
+    const f = foundFields[name] = { input, chip, find, own, clear, path: null, typed: !!own(), finding: false };
+    input.addEventListener("input", () => { f.typed = true; drawFound(name); });
+    find.addEventListener("click", () => act(find, async () => {
+      f.finding = true;   // until the checks answer afresh, an older answer is not put in the box
+      try {
+        if (f.own()) {    // the user's own path set aside: the studio's to find again
+          const reply = await ui.post("/api/settings", { values: f.clear() });
+          if (reply.problems || reply.error) {
+            announce((reply.problems || [reply.error]).join(" "), "assertive");
+            return;
+          }
+          saved = reply.settings;
+        }
+        f.typed = false;
+        f.input.value = "";
+        const path = await lookAgain(name);
+        f.finding = false;
+        f.path = path;
+        f.input.value = path;
+        drawFound(name);
+        if (path) f.input.focus();   // Find it hides once the box is filled: focus goes to the box
+        announce(path ? `Found by itself: ${path}` : "Not found by itself: give its path.", path ? undefined : "assertive");
+      } finally {
+        f.finding = false;
+      }
+    }));
+    return { chip, find };
+  }
+  // What the studio found for a field: `path` when it has just answered (undefined: no new answer). The box takes it
+  // while the user has typed nothing there and has no path of their own saved.
+  function drawFound(name, path) {
+    const f = foundFields[name];
+    if (!f) return;
+    if (path !== undefined && !f.finding) {
+      f.path = path || "";
+      if (!f.typed && !f.own() && document.activeElement !== f.input) f.input.value = f.path;
+    }
+    const value = f.input.value.trim();
+    const isFound = !f.own() && !!f.path && value === f.path;
+    if (isFound) f.input.dataset.found = f.path;
+    else delete f.input.dataset.found;
+    const missing = !f.own() && f.path === "" && !value;
+    f.chip.hidden = !isFound && !missing;
+    f.chip.className = `chip ${isFound ? "ok" : "bad"}`;
+    setText(f.chip, isFound ? "Found by itself" : "Not found");
+    f.find.hidden = value !== "";
+  }
+  // What the checks say the studio found by itself for `name` (undefined while that check has not answered): a
+  // program's path, REA's folder when REA is there, a backend's path (`bk-<id>`).
+  function foundIn(name, checks) {
+    if (!checks) return undefined;
+    if (name.startsWith("bk-")) {
+      const b = Array.isArray(checks.backends) ? checks.backends.find((x) => `bk-${x.id}` === name) : null;
+      return b ? b.found_path || "" : undefined;
+    }
+    const check = checks[name];
+    if (!check) return undefined;
+    return check.found ? (name === "rea" ? check.dir : check.path) || "" : "";
+  }
+  // The studio looks again (its checks run afresh): what it found for `name`, or "".
+  async function lookAgain(name) {
+    shown = "";
+    await ui.post("/api/check", {});
+    for (let tries = 0; tries < 240; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const info = await ui.get("/api/settings").catch(() => null);
+      if (info && info.checks && !info.checks.checking) return foundIn(name, info.checks) || "";
+    }
+    return "";
   }
   function note(kind, ...lines) {
     const mark = kind === "ok" ? "check" : kind === "soft" ? "refresh" : kind === "info" ? "info" : "alert";
@@ -174,10 +258,11 @@ window.studioSettings = (() => {
     boxes.rea = ui.h("div", { class: "results" });
     const out = ui.h("div", { class: "results" });
     const dir = saved.rea_dir_used || "..\\rea";
+    const reaBox = text("rea_dir", { class: "input mono", placeholder: dir });
     const form = ui.h("form", { class: "form", novalidate: true }, boxes.rea,
       ui.h("div", { class: "fields" },
-        field("REA checkout folder", text("rea_dir", { class: "input mono", placeholder: dir }),
-          "The cloned github.com/morluto/rea. Empty uses the sibling “rea” folder.")),
+        field("REA checkout folder", reaBox, "The cloned github.com/morluto/rea. Empty uses the sibling “rea” folder.",
+          foundParts("rea", reaBox, () => saved.rea_dir || "", () => ({ rea_dir: "" }), "the REA checkout folder"))),
       ui.h("div", { class: "set-build" },
         ui.h("p", { class: "field-hint" }, `If REA is cloned but not built, run these once in a terminal, with Node ${saved.node_requirement || "24"}. On Windows, REA also needs its prebuilt native file; its checkout’s native\\windows\\README.md says how to restore it.`),
         copyBlock([`cd "${dir}"`, "npm ci", "npm run build:cached"], "Copy the build commands")),
@@ -191,10 +276,11 @@ window.studioSettings = (() => {
   function claudeSection() {
     boxes.claude = ui.h("div", { class: "results" });
     const out = ui.h("div", { class: "results" });
+    const claudeBox = text("claude_bin", { class: "input mono" });
     const form = ui.h("form", { class: "form", novalidate: true }, boxes.claude,
       ui.h("div", { class: "fields" },
         field("Model", text("model", { placeholder: "Account default", list: "re-models" }), "Empty uses the account’s default. “sonnet” uses less of the limit."),
-        field("Path to Claude Code", text("claude_bin", { class: "input mono", placeholder: "Found by itself" }), foundHint("claude"))),
+        field("Path to Claude Code", claudeBox, null, foundParts("claude", claudeBox, () => saved.claude_bin || "", () => ({ claude_bin: "" }), "Claude Code"))),
       ui.h("datalist", { id: "re-models" }, ["sonnet", "opus", "haiku"].map((m) => ui.h("option", { value: m }))),
       out);
     const look = checkButton("Check the sign-in", "Asks Claude Code who is signed in. Sends Claude no question.");
@@ -253,9 +339,10 @@ window.studioSettings = (() => {
   function nodeSection() {
     boxes.node = ui.h("div", { class: "results" });
     const out = ui.h("div", { class: "results" });
+    const nodeBox = text("node_bin", { class: "input mono" });
     const form = ui.h("form", { class: "form", novalidate: true }, boxes.node,
       ui.h("div", { class: "fields" },
-        field("Path to Node", text("node_bin", { class: "input mono", placeholder: saved.node_used || "Found by itself" }), foundHint("node"))),
+        field("Path to Node", nodeBox, null, foundParts("node", nodeBox, () => saved.node_bin || "", () => ({ node_bin: "" }), "Node"))),
       out);
     const keep = saveButton(form, out, () => ui.put(out, note("ok", "Saved.")));
     form.append(ui.h("div", { class: "form-foot" }, ui.h("span", { class: "grow" }), keep));
@@ -263,23 +350,12 @@ window.studioSettings = (() => {
       `REA needs Node ${saved.node_requirement}. Empty finds Node 24 through fnm, then a plain node on PATH.`, form);
   }
 
-  function foundHint(name) {
-    boxes[`${name}Found`] = ui.h("span", { class: "field-hint found", "data-found": name }, "Only if it is not found by itself.");
-    return boxes[`${name}Found`];
-  }
-  function showFound(name, check, setting) {
-    const box = boxes[`${name}Found`];
-    if (!box) return;
-    let t;
-    if (saved[setting]) t = check && check.path ? `In use: ${check.path}` : "As named here.";
-    else if (check && check.path) t = `Found by itself: ${check.path}${check.how ? ` (${check.how})` : ""}`;
-    else t = check ? "Not found by itself: give its path." : "Only if it is not found by itself.";
-    setText(box, t);
-  }
-
   // ---------- backends ----------
   const statusOf = (b) => (b.in_use ? "in use" : b.found ? "found" : "absent");
   const kindOf = (b) => (b.in_use ? "ok" : b.found ? "warn" : "");
+  // A backend's saved choice ({active, path}), and the saved map with its path set aside (Find it).
+  const ownBackend = (id) => ({ active: true, path: "", ...((saved.backends || {})[id] || {}) });
+  const clearBackend = (id) => ({ backends: { ...(saved.backends || {}), [id]: { active: ownBackend(id).active !== false, path: "" } } });
   function backendsSection() {
     boxes.backends = ui.h("div", { class: "backends" }, note("soft", "Checking…"));
     boxes.backendsOut = ui.h("div", { class: "results" });
@@ -304,6 +380,7 @@ window.studioSettings = (() => {
         row.chip.className = `chip ${kindOf(b)}`;
         setText(row.chip, statusOf(b));
         setText(row.found, b.found_path ? `Found: ${b.found_path}` : `Not found. ${b.unlocks || ""}`.trim());
+        if (row.path) drawFound(`bk-${b.id}`, b.found_path || "");
       }
       return;
     }
@@ -332,9 +409,12 @@ window.studioSettings = (() => {
           path.setAttribute("aria-describedby", message ? `${err.id} ${foundId}` : foundId);
         };
         path.addEventListener("input", () => backendRows[b.id].error(""));
+        const parts = foundParts(`bk-${b.id}`, path, () => ownBackend(b.id).path, () => clearBackend(b.id), b.label);
         controls.push(
           ui.h("div", { class: "set-switch" }, active, ui.h("label", { for: active.id }, `Use ${b.label}`)),
-          ui.h("div", { class: "field set-bk-path" }, ui.h("label", { class: "field-label", for: path.id }, `${b.label} ${what} path`), path, err));
+          ui.h("div", { class: "field set-bk-path" },
+            ui.h("span", { class: "field-head" }, ui.h("label", { class: "field-label", for: path.id }, `${b.label} ${what} path`), parts.chip),
+            ui.h("span", { class: "found-row" }, path, parts.find), err));
       } else {
         controls.push(ui.h("span", { class: "field-hint" }, "Detected by itself; nothing to set."));
       }
@@ -342,6 +422,7 @@ window.studioSettings = (() => {
         ui.h("div", { class: "b-text" }, ui.h("b", { id: nameId }, b.label), found), chip,
         ui.h("div", { class: "b-controls" }, controls));
     }));
+    for (const b of list) if (backendRows[b.id] && backendRows[b.id].path) drawFound(`bk-${b.id}`, b.found_path || "");
   }
 
   async function saveBackends() {
@@ -349,7 +430,7 @@ window.studioSettings = (() => {
     for (const cb of boxes.backends.querySelectorAll("[data-active]")) {
       const id = cb.getAttribute("data-active");
       const path = boxes.backends.querySelector(`[data-path="${CSS.escape(id)}"]`);
-      map[id] = { active: cb.checked, path: path ? path.value.trim() : "" };
+      map[id] = { active: cb.checked, path: path ? asSaved(path) : "" };
     }
     const reply = await ui.post("/api/settings", { values: { backends: map } });
     const rows = Object.values(backendRows || {}).filter((row) => row.error);
@@ -439,13 +520,12 @@ window.studioSettings = (() => {
     ui.put(boxes.node, !node ? waiting : node.ok
       ? note("ok", `Node ${node.version}${node.how ? ` (${node.how})` : ""}.`)
       : note("bad", node.error, node.how ? `Tried: ${node.how}.` : null));
-    showFound("claude", claude, "claude_bin");
-    showFound("node", node, "node_bin");
+    for (const name of ["rea", "claude", "node"]) drawFound(name, foundIn(name, checks));
     drawBackends(checks.backends);
   }
 
   async function render(helpers, container, extra) {
-    ui = helpers; boxes = {}; shown = ""; backendRows = null; setupRows = null;
+    ui = helpers; boxes = {}; shown = ""; backendRows = null; setupRows = null; foundFields = {};
     ui.put(container, ui.h("p", { class: "lede" }, "Loading…"));
     const info = await ui.get("/api/settings");
     if (!info || info.error || !info.settings) {

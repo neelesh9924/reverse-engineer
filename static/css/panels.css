@@ -148,7 +148,6 @@
 .b-controls { display: flex; align-items: flex-end; gap: 8px 18px; flex-wrap: wrap; width: 100%; padding-left: 18px; }
 .b-controls .set-switch { min-height: 36px; }
 .set-bk-path { flex: 1 1 280px; max-width: 420px; }
-.found { overflow-wrap: anywhere; }
 
 /* ───────────── small screens ───────────── */
 @media (max-width: 1100px) {

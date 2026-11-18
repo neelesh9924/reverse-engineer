@@ -47,6 +47,11 @@ has the security model.
 - **Accessibility is part of done.** Accessible names, `<label for>`, hints through
   `aria-describedby`, errors through `aria-invalid`, focus never lost on re-render, dialogs that
   trap and return focus.
+- **What the studio finds by itself shows as found** (the owner's word, 18 Nov 2026; their other
+  studios do the same). REA's folder, Node, Claude Code and each backend's path: the whole path in
+  its box, Found by itself beside the name (Not found when nothing was), and Find it once the box
+  is emptied. A box left as found is saved empty, so it stays the studio's to find
+  (`settings.js` `foundParts`, `asSaved`).
 - **Tests only grow.** Never delete, skip or weaken a failing test to make a run pass: fix the
   code, or, if the test itself looks wrong, stop and ask the user first. CI's "Test count guard"
   fails a green run with fewer tests than the repo variable `MIN_TESTS` (268 when it was set up).

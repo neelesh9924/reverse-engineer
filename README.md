@@ -197,6 +197,11 @@ old, Claude Code not signed in. Then add a subject with **New subject**.
 Settings are saved in `data\settings.json`. Most are on the Settings page; the rest can be set
 by hand in that file while the studio is closed.
 
+Where the studio finds something by itself (REA's folder, Node, Claude Code, a backend), the
+Settings page shows the whole path in its box with **Found by itself** beside the name. A box
+left as found is saved empty, so the studio keeps finding it; empty a box and **Find it** looks
+again.
+
 | Setting | Default | Where | What it does |
 |---|---|---|---|
 | `theme` | `auto` | Settings | `auto` (as Windows has it), `light` or `dark` |
